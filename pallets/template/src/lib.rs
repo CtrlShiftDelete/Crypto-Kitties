@@ -95,6 +95,8 @@ pub mod pallet {
 		Created { kitty: [u8; 16], owner: T::AccountId },
 		/// A kitty was successfully transferred.
 		Transferred { from: T::AccountId, to: T::AccountId, kitty: [u8; 16] },
+		/// The price of a kitty was successfully set.
+		PriceSet { kitty: [u8; 16], price: Option<BalanceOf<T>> },
 	}
 
 	// Your Pallet's error messages.
@@ -150,6 +152,32 @@ pub mod pallet {
 			let kitty = Kitties::<T>::get(&kitty_id).ok_or(Error::<T>::NoKitty)?;
 			ensure!(kitty.owner == from, Error::<T>::NotOwner);
 			Self::do_transfer(kitty_id, to)?;
+			Ok(())
+		}
+
+		/// Set the price for a kitty.
+		///
+		/// Updates kitty price and updates storage.
+		#[pallet::weight(0)]
+		pub fn set_price(
+			origin: OriginFor<T>,
+			kitty_id: [u8; 16],
+			new_price: Option<BalanceOf<T>>,
+		) -> DispatchResult {
+			// Make sure the caller is from a signed origin
+			let sender = ensure_signed(origin)?;
+
+			// Ensure the kitty exists and is called by the kitty owner
+			let mut kitty = Kitties::<T>::get(&kitty_id).ok_or(Error::<T>::NoKitty)?;
+			ensure!(kitty.owner == sender, Error::<T>::NotOwner);
+
+			// Set the price in storage
+			kitty.price = new_price;
+			Kitties::<T>::insert(&kitty_id, kitty);
+
+			// Deposit a "PriceSet" event.
+			Self::deposit_event(Event::PriceSet { kitty: kitty_id, price: new_price });
+
 			Ok(())
 		}
 	}
@@ -213,40 +241,37 @@ pub mod pallet {
 		}
 
 		// Update storage to transfer kitty
-        pub fn do_transfer(
-            kitty_id: [u8; 16],
-            to: T::AccountId,
-        ) -> DispatchResult {
-            // Get the kitty
-            let mut kitty = Kitties::<T>::get(&kitty_id).ok_or(Error::<T>::NoKitty)?;
-            let from = kitty.owner;
+		pub fn do_transfer(kitty_id: [u8; 16], to: T::AccountId) -> DispatchResult {
+			// Get the kitty
+			let mut kitty = Kitties::<T>::get(&kitty_id).ok_or(Error::<T>::NoKitty)?;
+			let from = kitty.owner;
 
-            ensure!(from != to, Error::<T>::TransferToSelf);
-            let mut from_owned = KittiesOwned::<T>::get(&from);
+			ensure!(from != to, Error::<T>::TransferToSelf);
+			let mut from_owned = KittiesOwned::<T>::get(&from);
 
-            // Remove kitty from list of owned kitties.
-            if let Some(ind) = from_owned.iter().position(|&id| id == kitty_id) {
-                from_owned.swap_remove(ind);
-            } else {
-                return Err(Error::<T>::NoKitty.into())
-            }
+			// Remove kitty from list of owned kitties.
+			if let Some(ind) = from_owned.iter().position(|&id| id == kitty_id) {
+				from_owned.swap_remove(ind);
+			} else {
+				return Err(Error::<T>::NoKitty.into())
+			}
 
-            // Add kitty to the list of owned kitties.
-            let mut to_owned = KittiesOwned::<T>::get(&to);
-            to_owned.try_push(kitty_id).map_err(|_| Error::<T>::TooManyOwned)?;
+			// Add kitty to the list of owned kitties.
+			let mut to_owned = KittiesOwned::<T>::get(&to);
+			to_owned.try_push(kitty_id).map_err(|_| Error::<T>::TooManyOwned)?;
 
-            // Transfer succeeded, update the kitty owner and reset the price to `None`.
-            kitty.owner = to.clone();
-            kitty.price = None;
+			// Transfer succeeded, update the kitty owner and reset the price to `None`.
+			kitty.owner = to.clone();
+			kitty.price = None;
 
-            // Write updates to storage
-            Kitties::<T>::insert(&kitty_id, kitty);
-            KittiesOwned::<T>::insert(&to, to_owned);
-            KittiesOwned::<T>::insert(&from, from_owned);
+			// Write updates to storage
+			Kitties::<T>::insert(&kitty_id, kitty);
+			KittiesOwned::<T>::insert(&to, to_owned);
+			KittiesOwned::<T>::insert(&from, from_owned);
 
-            Self::deposit_event(Event::Transferred { from, to, kitty: kitty_id });
+			Self::deposit_event(Event::Transferred { from, to, kitty: kitty_id });
 
-            Ok(())
-        }
-    }
+			Ok(())
+		}
+	}
 }
